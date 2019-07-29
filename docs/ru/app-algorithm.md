@@ -9,7 +9,8 @@
  + [Парсинг хуков]()
  + [Добавление данных на обработку в очередь Reddis]()
 3. Обработка данных в очереди Reddis
- + []()
+ + [Добавление/удаление данных в/из Redis]()
+ + [Вызов функций из очереди Reddis и обработка данных]()
 4. ChatBot - отправка сообщений в Matrix по событиям Jira
  + []()
 5. ChatBot - обработка комманд от пользователя
@@ -22,7 +23,8 @@
 
 + веб-сервер, на который приходят хуки от Jira
 + клиент к мессенджеру (Matrix)
-+ очередь событий на обработку Reddis
++ очередь событий на обработку Redis
++ FSM управляющая всем зоопарком
 
 Порядок старта
 --------------
@@ -103,6 +105,68 @@ module.exports = async body => {
 Обработка данных в очереди Reddis
 =================================
 
+## Добавление/удаление данных в/из Redis
+
+1. Добавление ключей и данных в Реддис
+
+```
+.../src/jira-hook-parser.js
+...
+module.exports = async body => {
+    try {
+        if (await isIgnore(body)) {
+            return;
+        }
+
+        const parsedBody = getFuncAndBody(body);
+        await Promise.all(parsedBody.map(saveIncoming));
+
+        return true;
+    } catch (err) {
+        logger.error('Error in parsing ', err);
+
+        return false;
+    }
+};
+```
+В функцию `saveIncoming` поступают данные из распарсенного хука и записываются в Реддис:
+
+```
+await redis.setAsync(redisKey, bodyToJSON);
+```
+
+2. Удаление ключей и данных из Реддис
+
+После успешной отработки функций, ключи удаляются из Реддис
+```
+handleRedisData
+
+await bot[funcName]({...data, chatApi});
+await redis.delAsync(redisKey);
+```
+```
+handleRedisRooms
+
+await bot.createRoom({...data, chatApi});
+await redis.delAsync(REDIS_ROOM_KEY);
+```
+
+В этих двух функциях перехватываются ошибки когда комната не создана, в этом случае вызывается функция, которая перезаписывает ключи в Реддис:
+```
+const rewriteRooms = async createRoomData => {
+    try {
+        const bodyToJSON = JSON.stringify(createRoomData);
+
+        await redis.setAsync(REDIS_ROOM_KEY, bodyToJSON);
+        logger.info('Rooms data rewrited by redis.');
+    } catch (err) {
+        throw ['Error while rewrite rooms in redis:', err].join('\n');
+    }
+};
+```
+
+## Вызов функций из очереди Reddis и обработка данных
+
 Данные из Redis обрабатываются так:
 
 ```
@@ -120,6 +184,20 @@ module.exports = async client => {
     }
 };
 ```
+
+Данные условно делятся на два типа:
+
++ Создание комнаты (или изменение)
+```
+const redisRooms = await getRedisRooms();
+await handleRedisRooms(client, redisRooms);
+```
++ Остальные Хуки (комменты, ссылки, приглашение юзеров - все эти события могут быть вызваны при созданной комнате)
+```
+const dataFromRedis = await getDataFromRedis();
+await handleRedisData(client, dataFromRedis);
+```
+Сначала выбираются данные, уже сохраненные в реддис и к ним добавляются свежие данные.
 
 Этот код вызывается при:
 
@@ -174,6 +252,8 @@ async _handle() {
 }
 
 ```
+
+
 
 ChatBot - отправка сообщений в Matrix по событиям Jira
 ======================================================
