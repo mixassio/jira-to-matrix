@@ -119,6 +119,13 @@ const handleRedisData = async (client, dataFromRedis) => {
 
                         return {newRoomRecord, log};
                     }
+
+                    if (utils.isUserNotInRoom(errBody)) {
+                        await redis.delAsync(redisKey);
+                        const log = `${redisKey} --- true`;
+
+                        return {log};
+                    }
                     return {log};
                 }
             })

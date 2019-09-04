@@ -26,6 +26,8 @@ const INDENT = '&nbsp;&nbsp;&nbsp;&nbsp;';
 const LINE_BREAKE_TAG = '<br>';
 const NO_ROOM_PATTERN = 'No roomId for ';
 const END_NO_ROOM_PATTERN = ' from Matrix';
+const USER_NOT_IN_ROOM = 'User not in room ';
+const END_USER_NOT_IN_ROOM = '. User will not be added to room.';
 
 const NEW_YEAR_2018 = new Date(Date.UTC(2018, 0, 1, 3));
 
@@ -379,6 +381,8 @@ const utils = {
 
     isNoRoomError: errStr => errStr.includes(NO_ROOM_PATTERN),
 
+    isUserNotInRoom: errStr => errStr.includes(USER_NOT_IN_ROOM),
+
     isAdmin: user => messenger.admins.includes(user),
 
     // * --------------------------------- Other utils ------------------------------- *
@@ -484,6 +488,8 @@ module.exports = {
     COMMON_NAME,
     NO_ROOM_PATTERN,
     END_NO_ROOM_PATTERN,
+    USER_NOT_IN_ROOM,
+    END_USER_NOT_IN_ROOM,
     PING_INTERVAL,
     PING_COUNT,
     ...utils,

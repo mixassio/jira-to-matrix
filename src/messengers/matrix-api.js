@@ -350,6 +350,9 @@ module.exports = class Matrix extends MessengerAbstract {
         try {
             const id = roomId || await this.getRoomId(name);
             const room = await this.client.getRoom(id);
+            if (!room) {
+                throw `${utils.USER_NOT_IN_ROOM}${name}${utils.END_USER_NOT_IN_ROOM}`;
+            }
             const joinedMembers = room.getJoinedMembers();
 
             return joinedMembers.map(({userId}) => userId);
