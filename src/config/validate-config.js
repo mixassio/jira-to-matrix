@@ -1,7 +1,9 @@
 const Joi = require('joi');
 const logger = require('../modules/log.js')(module);
 
-const int = Joi.number().integer().required();
+const int = Joi.number()
+    .integer()
+    .required();
 const string = Joi.string().required();
 const boolean = Joi.boolean().required();
 const address = [string.uri(), string.ip()];
@@ -53,6 +55,12 @@ const schema = obj({
         user: string,
         password: string,
         eventPort: Joi.number().optional(),
+        bots: array(
+            obj({
+                user: string,
+                password: string,
+            }),
+        ).optional(),
     }),
     log: {
         type: string,
@@ -61,8 +69,21 @@ const schema = obj({
         consoleLevel: string,
     },
     ping: objOptional({
-        interval: Joi.number().integer().optional(),
-        count: Joi.number().integer().optional(),
+        interval: Joi.number()
+            .integer()
+            .optional(),
+        count: Joi.number()
+            .integer()
+            .optional(),
+    }),
+    colors: objOptional({
+        projects: Joi.alternatives(array(Joi.string()).optional(), 'all'),
+        links: obj({
+            issue: string,
+            green: string,
+            yellow: string,
+            'blue-gray': string,
+        }).unknown(true),
     }),
 });
 
@@ -75,7 +96,7 @@ const validate = function validate(config) {
         abortEarly: false,
         convert: false,
     };
-    const {error} = Joi.validate(config, schema, options);
+    const { error } = Joi.validate(config, schema, options);
     if (error) {
         logger.error('Config is invalid:');
         error.details.forEach(detail => {

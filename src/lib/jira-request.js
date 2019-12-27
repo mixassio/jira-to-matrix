@@ -1,23 +1,22 @@
 const querystring = require('querystring');
 const Ramda = require('ramda');
 const logger = require('../modules/log.js')(module);
-const {jira, inviteIgnoreUsers = []} = require('../config');
-const {request, requestPost, requestPut} = require('./request.js');
+const { jira, inviteIgnoreUsers = [] } = require('../config');
+const { request, requestPost, requestPut } = require('./request.js');
 const utils = require('./utils.js');
 const messages = require('./messages');
 const schemas = require('./schemas');
 
-const {url: jiraUrl} = jira;
+const { url: jiraUrl } = jira;
 
 const isExpectedToInvite = name => name && !inviteIgnoreUsers.includes(name);
 
 // Checking occurrences of current name
 
-
 const jiraRequests = {
-    checkUser: ({name, displayName}, expectedName) =>
-        name.toLowerCase().includes(expectedName.toLowerCase())
-        || displayName.toLowerCase().includes(expectedName.toLowerCase()),
+    checkUser: ({ name, displayName }, expectedName) =>
+        name.toLowerCase().includes(expectedName.toLowerCase()) ||
+        displayName.toLowerCase().includes(expectedName.toLowerCase()),
 
     postComment: (roomName, sender, bodyText) => {
         const url = utils.getRestUrl('issue', roomName, 'comment');
@@ -33,7 +32,7 @@ const jiraRequests = {
 
     getPossibleIssueStatuses: async roomName => {
         const url = utils.getRestUrl('issue', roomName, 'transitions');
-        const {transitions} = await request(url);
+        const { transitions } = await request(url);
 
         return transitions;
     },
@@ -70,13 +69,13 @@ const jiraRequests = {
      * @param {array} roomMembers array of users linked to current issue
      * @return {array} jira response with issue
      */
-    getIssueWatchers: async ({key}) => {
+    getIssueWatchers: async ({ key }) => {
         const url = utils.getRestUrl('issue', key, 'watchers');
         const body = await request(url);
-        const watchers = (body && Array.isArray(body.watchers)) ? body.watchers.map(item => item.name) : [];
+        const watchers = body && Array.isArray(body.watchers) ? body.watchers.map(item => item.name) : [];
 
         const issue = await jiraRequests.getIssue(key);
-        const roomMembers = utils.handleIssueAsHook.getMembers({issue});
+        const roomMembers = utils.handleIssueAsHook.getMembers({ issue });
 
         const allWatchersSet = new Set([...roomMembers, ...watchers]);
 
@@ -107,20 +106,90 @@ const jiraRequests = {
     getIssue: async (id, params) => {
         try {
             const url = utils.getRestUrl('issue', id);
-            const issue = await request(url, {qs: params});
+            const issue = await request(url, { qs: params });
 
             return issue;
         } catch (err) {
             throw ['Error in get issue', err].join('\n');
         }
     },
+    createIssue: ({ summary, issueTypeId, projectId, parentId, isEpic, isSubtask, styleProject }) => {
+        const uri = utils.getRestUrl('issue');
+
+        if (isSubtask || (isEpic && styleProject !== 'classic')) {
+            return requestPost(uri, schemas.issueChild(summary, issueTypeId, projectId, parentId));
+        }
+
+        return requestPost(uri, schemas.issueNotChild(summary, issueTypeId, projectId));
+    },
+
+    createEpicLinkClassic: (issueKey, parentId) => {
+        const uri = utils.getRestUrl('issue', issueKey);
+
+        return requestPut(uri, schemas.issueEpicLink(parentId));
+    },
+
+    createIssueLink: (issueKey1, issueKey2) => {
+        const uri = utils.getRestUrl('issueLink');
+
+        return requestPost(uri, schemas.issueLink(issueKey1, issueKey2));
+    },
 
     /**
      * Make GET request to jira by projectID
-     * @param {string} id project ID in jira
-     * @return {object} jira response with issue
+     * @param {string} projectKey project ID in jira
+     * @return {Promise<{key: string, id: number, name: str}>} jira response with issue
      */
-    getProject: id => request(utils.getRestUrl('project', id)),
+    getProject: async projectKey => {
+        const projectBody = await request(utils.getRestUrl('project', projectKey));
+        const {
+            id,
+            key,
+            lead: { key: leadKey, name: leadName },
+            name,
+            issueTypes,
+            roles: { Administrator = '', Administrators = '' },
+            isPrivate,
+            style,
+        } = projectBody;
+
+        const adminsURL = Administrators || Administrator;
+        const isIgnore = isPrivate && style === 'new-gen';
+
+        const project = {
+            id,
+            key,
+            lead: { name: leadName, key: leadKey },
+            name,
+            issueTypes: issueTypes.map(({ id, name, description, subtask }) => ({ id, name, description, subtask })),
+            adminsURL,
+            isIgnore,
+            style,
+        };
+
+        return project;
+    },
+
+    getProjectWithAdmins: async projectKey => {
+        const projectBody = await jiraRequests.getProject(projectKey);
+        const { adminsURL } = projectBody;
+
+        try {
+            const { actors = [{ name: '' }] } = await request(adminsURL);
+            const admins = [
+                ...actors.map(({ id, name }) => ({
+                    id,
+                    name,
+                })),
+            ];
+
+            return { ...projectBody, admins };
+        } catch (err) {
+            logger.warn('Not admins from request', err);
+
+            return projectBody;
+        }
+    },
 
     /**
      * Make request to jira by issueID adding renderedFields
@@ -149,7 +218,7 @@ const jiraRequests = {
 
             const renderedValues = Ramda.pipe(
                 Ramda.pick(fields),
-                Ramda.filter(value => !!value)
+                Ramda.filter(value => !!value),
             )(issue.renderedFields);
 
             return renderedValues;
@@ -159,7 +228,7 @@ const jiraRequests = {
     },
 
     getUsersByParam: username => {
-        const queryPararms = querystring.stringify({username});
+        const queryPararms = querystring.stringify({ username });
         const url = utils.getRestUrl('user', `search?${queryPararms}`);
 
         return request(url);
@@ -172,9 +241,7 @@ const jiraRequests = {
         }
         const allUsers = await jiraRequests.getUsersByParam(name);
 
-        return allUsers.reduce((prev, cur) =>
-            (jiraRequests.checkUser(cur, name) ? [...prev, cur] : prev),
-        []);
+        return allUsers.reduce((prev, cur) => (jiraRequests.checkUser(cur, name) ? [...prev, cur] : prev), []);
     },
 
     // recursive function to get users by num and startAt (start position in jira list of users)
@@ -221,6 +288,20 @@ const jiraRequests = {
         } catch (err) {
             logger.warn('No issue by ', id);
             return false;
+        }
+    },
+
+    getStatusData: async statusId => {
+        try {
+            const statusUrl = utils.getRestUrl('status', statusId);
+
+            const data = await request(statusUrl);
+
+            return { colorName: Ramda.path(['statusCategory', 'colorName'], data) };
+        } catch (error) {
+            logger.error(error);
+
+            return {};
         }
     },
 };
