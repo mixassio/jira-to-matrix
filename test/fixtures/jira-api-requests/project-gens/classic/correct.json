@@ -34,7 +34,7 @@
             "id": "10003",
             "description": "Подзадача задачи.",
             "iconUrl": "https://jira.test-example.ru/secure/viewavatar?size=xsmall&avatarId=10316&avatarType=issuetype",
-            "name": "Подзадачи",
+            "name": "Sub-task",
             "subtask": true,
             "avatarId": 10316
         },
@@ -63,6 +63,14 @@
             "iconUrl": "https://jira.test-example.ru/images/icons/issuetypes/epic.svg",
             "name": "Эпик",
             "subtask": false
+        },
+        {
+            "self": "https://jira.test-example.ru/rest/api/2/issuetype/10005",
+            "id": "10005",
+            "description": "Created for testing",
+            "iconUrl": "https://jira.test-example.ru/images/icons/issuetypes/epic.svg",
+            "name": "TestTypeTask",
+            "subtask": false
         }
     ],
     "assigneeType": "UNASSIGNED",
@@ -74,7 +82,7 @@
         "Service Desk Team": "https://jira.test-example.ru/rest/api/2/project/10305/role/10325",
         "Assistants": "https://jira.test-example.ru/rest/api/2/project/10305/role/10258",
         "Service Desk Customers": "https://jira.test-example.ru/rest/api/2/project/10305/role/10324",
-        "Administrators": "https://jira.test-example.ru/rest/api/2/project/10305/role/10002",
+        "Administrators": "https://jira.test-example.ru/jira/rest/api/2/project/10305/role/10002",
         "Members": "https://jira.test-example.ru/rest/api/2/project/10305/role/10257"
     },
     "avatarUrls": {

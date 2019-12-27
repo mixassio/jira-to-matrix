@@ -1,8 +1,8 @@
 const redis = require('redis');
 const conf = require('./config');
 const logger = require('./modules/log.js')(module);
-const {promisify} = require('util');
-const {getRedisLinkKey} = require('./lib/utils');
+const { promisify } = require('util');
+const { getRedisLinkKey } = require('./lib/utils');
 
 const createClient = config => {
     try {
@@ -31,7 +31,7 @@ module.exports = {
     setAsync: promisify(client.set).bind(client),
     delAsync: promisify(client.del).bind(client),
     keysAsync: promisify(client.keys).bind(client),
-    isInEpic: (redisEpicKey, issueID) => sismemberAsync(redisEpicKey, issueID),
+    hasChild: (redisEpicKey, issueID) => sismemberAsync(redisEpicKey, issueID),
     saveToEpic: (redisEpicKey, issueID) => saddAsync(redisEpicKey, issueID),
     isNewLink: id => setnxAsync(getRedisLinkKey(id), '1'),
 };

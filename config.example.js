@@ -64,6 +64,16 @@ module.exports = Object.freeze({
         user: 'bot',
         // password
         password: 'key',
+        bots: [
+            {
+                user: 'bot2',
+                password: 'key',
+            },
+            {
+                user: 'bot3',
+                password: 'key',
+            },
+        ],
     },
     // log params based on winston https://github.com/winstonjs/winston
     log: {
@@ -82,5 +92,26 @@ module.exports = Object.freeze({
         interval: 10,
         // how many times tring reconnect by default 10
         count: 10,
+    },
+    // colors links to update according to every color in jira
+    // you must upload it before and get links to set them here
+    // Optionally
+    colors: {
+        //
+        links: {
+            // This link used when you create room
+            issue: 'mxc://matrix.example/purple',
+            // colors, at least green, yellow, blue-gray must be
+            green: 'mxc://matrix.example/green',
+            yellow: 'mxc://matrix.example/yellow',
+            'blue-gray': 'mxc://matrix.example/blue-gray',
+            // additional is possible according to your custom jira color
+            purple: 'mxc://matrix.example/purple',
+        },
+        // Projects to use
+        // You can use this action for some projects only
+        // if you want to set all - projects: 'all'
+        // if you want to SKIP for all - just don't use this field or skip colors
+        projects: ['TEST'],
     },
 });

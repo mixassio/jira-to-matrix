@@ -1,21 +1,24 @@
 const translate = require('../locales');
 const Ramda = require('ramda');
-const {jira, features, messenger, ping} = require('../config');
-const {epicUpdates, postChangesToLinks} = features;
+const { jira, features, messenger, ping } = require('../config');
+const { epicUpdates, postChangesToLinks } = features;
 const messages = require('./messages');
 const delay = require('delay');
 
-const {field: epicField} = epicUpdates;
-const {url: jiraUrl} = jira;
+const { field: epicField } = epicUpdates;
+const { url: jiraUrl } = jira;
 
 const REDIS_ROOM_KEY = 'newrooms';
 // TODO: change until start correct bot work
 const ROOMS_OLD_NAME = 'rooms';
 const REDIS_LINK_PREFIX = 'link';
 const REDIS_EPIC_PREFIX = 'epic';
+const REDIS_PARENT_PREFIX = 'parent';
+const REDIS_IGNORE_PREFIX = 'ignore:project';
+const HANDLED_KEY = 'handled';
 
 const DELIMITER = '|';
-const KEYS_TO_IGNORE = [ROOMS_OLD_NAME, DELIMITER];
+const KEYS_TO_IGNORE = [ROOMS_OLD_NAME, DELIMITER, REDIS_IGNORE_PREFIX, HANDLED_KEY];
 const [COMMON_NAME] = messenger.domain.split('.').slice(1, 2);
 const JIRA_REST = 'rest/api/2';
 
@@ -29,6 +32,11 @@ const END_NO_ROOM_PATTERN = ' from Matrix';
 
 const NEW_YEAR_2018 = new Date(Date.UTC(2018, 0, 1, 3));
 
+const httpStatus = {
+    OK: 200,
+    BAD_REQUEST: 404,
+};
+
 const getIdFromUrl = url => {
     const [res] = url
         .split('/')
@@ -38,7 +46,6 @@ const getIdFromUrl = url => {
 };
 
 const getNameFromMail = mail => mail && mail.split('@')[0];
-
 
 const handlers = {
     project: {
@@ -52,18 +59,16 @@ const handlers = {
         getDisplayName: body => Ramda.path(['user', 'displayName'], body),
         getSummary: body => Ramda.path(['issue', 'fields', 'summary'], body),
         getUserName: body => Ramda.path(['user', 'name'], body),
+        getParentIssueKey: body => Ramda.path(['issue', 'fields', 'parent', 'key'], body),
         getEpicKey: body => Ramda.path(['issue', 'fields', epicField], body),
         getType: body => Ramda.path(['issue', 'fields', 'issuetype', 'name'], body),
         getIssueId: body => Ramda.path(['issue', 'id'], body),
         getIssueKey: body => Ramda.path(['issue', 'key'], body),
         getCreatorDisplayName: body =>
             getNameFromMail(Ramda.path(['issue', 'fields', 'creator', 'emailAddress'], body)),
-        getCreator: body =>
-            Ramda.path(['issue', 'fields', 'creator', 'name'], body),
-        getReporter: body =>
-            Ramda.path(['issue', 'fields', 'reporter', 'name'], body),
-        getAssignee: body =>
-            Ramda.path(['issue', 'fields', 'assignee', 'name'], body),
+        getCreator: body => Ramda.path(['issue', 'fields', 'creator', 'name'], body),
+        getReporter: body => Ramda.path(['issue', 'fields', 'reporter', 'name'], body),
+        getAssignee: body => Ramda.path(['issue', 'fields', 'assignee', 'name'], body),
         getMembers: body => {
             const possibleMembers = ['getReporter', 'getCreator', 'getAssignee']
                 .map(func => handlers.issue[func](body))
@@ -80,17 +85,13 @@ const handlers = {
     },
     comment: {
         getComment: body => Ramda.path(['comment'], body),
-        getDisplayName: body =>
-            Ramda.path(['comment', 'author', 'displayName'], body),
+        getDisplayName: body => Ramda.path(['comment', 'author', 'displayName'], body),
         getAuthor: body => Ramda.path(['comment', 'author', 'name'], body),
-        getUpdateAuthor: body =>
-            Ramda.path(['comment', 'updateAuthor', 'name'], body),
+        getUpdateAuthor: body => Ramda.path(['comment', 'updateAuthor', 'name'], body),
         getCreatorDisplayName: body =>
             getNameFromMail(Ramda.path(['comment', 'updateAuthor', 'emailAddress'], body)) ||
             getNameFromMail(Ramda.path(['comment', 'author', 'emailAddress'], body)),
-        getCreator: body =>
-            handlers.comment.getUpdateAuthor(body) ||
-            handlers.comment.getAuthor(body),
+        getCreator: body => handlers.comment.getUpdateAuthor(body) || handlers.comment.getAuthor(body),
         getUrl: body => Ramda.path(['comment', 'self'], body),
         getIssueId: body => getIdFromUrl(handlers.comment.getUrl(body)),
         getIssueName: body => handlers.comment.getIssueId(body),
@@ -102,14 +103,11 @@ const handlers = {
     issuelink: {
         getLinks: body => [Ramda.path(['issueLink'], body)],
         getIssueName: body => Ramda.path(['issueLink', 'id'], body),
-        getIssueLinkSourceId: body =>
-            Ramda.path(['issueLink', 'sourceIssueId'], body),
-        getIssueLinkDestinationId: body =>
-            Ramda.path(['issueLink', 'destinationIssueId'], body),
-        getSourceRelation: body =>
-            Ramda.path(['issueLink', 'issueLinkType', 'outwardName'], body),
-        getDestinationRelation: body =>
-            Ramda.path(['issueLink', 'issueLinkType', 'inwardName'], body),
+        getIssueLinkSourceId: body => Ramda.path(['issueLink', 'sourceIssueId'], body),
+        getIssueLinkDestinationId: body => Ramda.path(['issueLink', 'destinationIssueId'], body),
+        getNameIssueLinkType: body => Ramda.path(['issueLink', 'issueLinkType', 'name'], body),
+        getSourceRelation: body => Ramda.path(['issueLink', 'issueLinkType', 'outwardName'], body),
+        getDestinationRelation: body => Ramda.path(['issueLink', 'issueLinkType', 'inwardName'], body),
     },
 };
 
@@ -142,9 +140,7 @@ const utils = {
 
     getDisplayName: body => utils.runMethod(body, 'getDisplayName'),
 
-    getMembers: body =>
-        utils.runMethod(body, 'getMembers') ||
-        handlers.issue.getMembers({issue: body}),
+    getMembers: body => utils.runMethod(body, 'getMembers') || handlers.issue.getMembers({ issue: body }),
 
     getIssueId: body => utils.runMethod(body, 'getIssueId'),
 
@@ -154,7 +150,7 @@ const utils = {
 
     getCreatorDisplayName: body => utils.runMethod(body, 'getCreatorDisplayName'),
 
-    getProjectKey: body => utils.runMethod(body, 'getProjectKey'),
+    getProjectKey: body => utils.runMethod(body, 'getProjectKey') || handlers.issue.getProjectKey(body),
 
     getLinks: body => utils.runMethod(body, 'getLinks'),
 
@@ -174,62 +170,59 @@ const utils = {
 
     getUserName: body => handlers.issue.getUserName(body),
 
-    getEpicKey: body => handlers.issue.getEpicKey(body),
+    getEpicKey: body => handlers.issue.getEpicKey(body) || handlers.issue.getParentIssueKey(body),
 
     getKey: body => handlers.issue.getIssueKey(body) || Ramda.path(['key'], body),
 
     getIssueLinkSourceId: body => handlers.issuelink.getIssueLinkSourceId(body),
 
-    getIssueLinkDestinationId: body =>
-        handlers.issuelink.getIssueLinkDestinationId(body),
+    getIssueLinkDestinationId: body => handlers.issuelink.getIssueLinkDestinationId(body),
+
+    getNameIssueLinkType: body => handlers.issuelink.getNameIssueLinkType(body),
 
     getSourceRelation: body => handlers.issuelink.getSourceRelation(body),
 
-    getDestinationRelation: body =>
-        handlers.issuelink.getDestinationRelation(body),
+    getDestinationRelation: body => handlers.issuelink.getDestinationRelation(body),
 
-    getSummary: body =>
-        utils.runMethod(body, 'getSummary') || utils.getResponcedSummary(body),
+    getSummary: body => utils.runMethod(body, 'getSummary') || utils.getResponcedSummary(body),
 
     getBodyTimestamp: body => Ramda.path(['timestamp'], body),
 
     getBodyWebhookEvent: body => Ramda.path(['webhookEvent'], body),
 
-    getHookUserName: body =>
-        utils.getCommentAuthor(body) || utils.getUserName(body) || utils.getDisplayName(body),
+    getHookUserName: body => utils.getCommentAuthor(body) || utils.getUserName(body) || utils.getDisplayName(body),
 
-    getChangelogItems: body =>
-        Ramda.pathOr([], ['items'], utils.getChangelog(body)),
+    getChangelogItems: body => Ramda.pathOr([], ['items'], utils.getChangelog(body)),
 
-    isCorrectWebhook: (body, hookName) =>
-        utils.getBodyWebhookEvent(body) === hookName,
+    isCorrectWebhook: (body, hookName) => utils.getBodyWebhookEvent(body) === hookName,
 
     isEpic: body => handlers.issue.getType(body) === 'Epic',
 
     isCommentEvent: body =>
-        utils.getHookType(body) === 'comment' &&
-        !utils.getBodyWebhookEvent(body).includes('deleted'),
+        utils.getHookType(body) === 'comment' && !utils.getBodyWebhookEvent(body).includes('deleted'),
 
     /**
-   * Get changelog field body from webhook from jira
-   * @param {string} fieldName key of changelog field
-   * @param {object} body webhook body
-   * @return {object} changelog field
-   */
+     * Get changelog field body from webhook from jira
+     * @param {string} fieldName key of changelog field
+     * @param {object} body webhook body
+     * @return {object} changelog field
+     */
     getChangelogField: (fieldName, body) =>
-        utils.getChangelogItems(body).find(item => item.field === fieldName),
+        utils.getChangelogItems(body).find(item => item.field === fieldName || item.fieldId === fieldName),
 
-    getNewSummary: body =>
-        Ramda.path(['toString'], utils.getChangelogField('summary', body)),
+    getNewSummary: body => Ramda.path(['toString'], utils.getChangelogField('summary', body)),
 
-    getNewStatus: body =>
-        Ramda.path(['toString'], utils.getChangelogField('status', body)),
+    getNewStatus: body => Ramda.path(['toString'], utils.getChangelogField('status', body)),
 
-    getNewKey: body =>
-        Ramda.path(['toString'], utils.getChangelogField('Key', body)),
+    getNewStatusId: body => Ramda.path(['to'], utils.getChangelogField('status', body)),
 
-    getOldKey: body =>
-        Ramda.path(['fromString'], utils.getChangelogField('Key', body)),
+    getNewKey: body => Ramda.path(['toString'], utils.getChangelogField('Key', body)),
+
+    getOldKey: body => Ramda.path(['fromString'], utils.getChangelogField('Key', body)),
+
+    getParentKey: body => handlers.issue.getParentIssueKey(body) || handlers.issue.getProjectKey(body),
+
+    getParentIssueKey: body => handlers.issue.getParentIssueKey(body),
 
     getRelations: issueLinkBody => ({
         inward: {
@@ -258,14 +251,12 @@ const utils = {
         const name = handlers.comment.getDisplayName(body);
         const eventName = utils.getBodyWebhookEvent(body);
 
-        return translate(eventName, {name});
+        return translate(eventName, { name });
     },
 
     getTextIssue: (body, path) => {
         const params = path.split('.');
-        const text = String(
-            Ramda.path(['issue', 'fields', ...params], body) || translate('miss')
-        ).trim();
+        const text = String(Ramda.path(['issue', 'fields', ...params], body) || translate('miss')).trim();
 
         return text;
     },
@@ -274,15 +265,9 @@ const utils = {
         const links = utils.getLinks(body);
 
         return links.reduce((acc, link) => {
-            const destIssue = Ramda.either(
-                Ramda.prop('outwardIssue'),
-                Ramda.prop('inwardIssue')
-            )(link);
+            const destIssue = Ramda.either(Ramda.prop('outwardIssue'), Ramda.prop('inwardIssue'))(link);
 
-            const destStatusCat = Ramda.path(
-                ['fields', 'status', 'statusCategory', 'id'],
-                destIssue
-            );
+            const destStatusCat = Ramda.path(['fields', 'status', 'statusCategory', 'id'], destIssue);
             if (postChangesToLinks.ignoreDestStatusCat.includes(destStatusCat)) {
                 return acc;
             }
@@ -291,15 +276,6 @@ const utils = {
     },
 
     // * ------------------------- Request selectors ------------------------- *
-
-    getProjectPrivateStatus: body => Ramda.path(['isPrivate'], body),
-
-    getProjectStyle: body => Ramda.path(['style'], body),
-
-    isNewGenProjectStyle: body => utils.getProjectStyle(body) === 'new-gen',
-
-    isIgnoreProject: body =>
-        utils.isNewGenProjectStyle(body) && utils.getProjectPrivateStatus(body),
 
     getResponcedSummary: body => Ramda.path(['fields', 'summary'], body),
 
@@ -313,8 +289,9 @@ const utils = {
 
     getRedisEpicKey: id => [REDIS_EPIC_PREFIX, DELIMITER, id].join(''),
 
-    getRedisKey: (funcName, body) =>
-        [funcName, utils.getBodyTimestamp(body)].join('_'),
+    getRedisParentKey: id => [REDIS_PARENT_PREFIX, DELIMITER, id].join(''),
+
+    getRedisKey: (funcName, body) => [funcName, utils.getBodyTimestamp(body)].join('_'),
 
     isIgnoreKey: key => !KEYS_TO_IGNORE.some(val => key.includes(val)),
 
@@ -331,7 +308,7 @@ const utils = {
     // * --------------------------------- Request utils ------------------------------- *
 
     auth: () => {
-        const {user, password} = jira;
+        const { user, password } = jira;
         const encoded = Buffer.from(`${user}:${password}`).toString('base64');
 
         return `Basic ${encoded}`;
@@ -354,12 +331,12 @@ const utils = {
                 .substring(1);
 
             if (`!${commandName}` === trimedBody) {
-                return {commandName};
+                return { commandName };
             }
 
             const bodyText = trimedBody.replace(`!${commandName}`, '').trim();
 
-            return {commandName, bodyText};
+            return { commandName, bodyText };
         } catch (err) {
             return {};
         }
@@ -396,36 +373,52 @@ const utils = {
     },
 
     getProjectKeyFromIssueKey: issueKey => issueKey.split('-').slice(0, 1),
-    getCommandAction: (val, collection) =>
-        collection.find(
-            ({id, name}) => id === val || name.toLowerCase() === val.toLowerCase()
-        ),
+    getCommandAction: (val, collection) => {
+        const numberVal = Number(val);
+        if (Number.isInteger(numberVal)) {
+            return collection[numberVal - 1];
+        }
+
+        return collection.find(({ name }) => name.toLowerCase() === val.toLowerCase());
+    },
 
     getLimit: () => NEW_YEAR_2018.getTime(),
 
     getListToHTML: list =>
         list.reduce(
-            (acc, {name, displayName}) =>
-                `${acc}<strong>${name}</strong> - ${displayName}<br>`,
-            `${translate('listUsers')}:<br>`
+            (acc, { name, displayName }) => `${acc}<strong>${name}</strong> - ${displayName}<br>`,
+            `${translate('listUsers')}:<br>`,
         ),
 
     getCommandList: list =>
         list.reduce(
-            (acc, {name, id}) => `${acc}<strong>${id})</strong> - ${name}<br>`,
-            `${translate('listJiraCommand')}:<br>`
+            (acc, { name, id }, index) => `${acc}<strong>${index + 1})</strong> - ${name}<br>`,
+            `${translate('listJiraCommand')}:<br>`,
         ),
 
-    expandParams: {expand: 'renderedFields'},
+    getIgnoreTips: (projectKey, currentTaskType) => {
+        if (currentTaskType.length === 0) {
+            return `${translate('emptyIgnoreList', { projectKey })}`;
+        }
+        return `${translate('currentIgnoreSettings', { projectKey })}
+                <br>
+                ${currentTaskType.map((name, id) => `<strong>${id + 1})</strong> - ${name}`).join('<br>')}
+                <br>
+                ${translate('varsComandsIgnoreSettings')}`;
+    },
 
-    propIn: Ramda.curry((prop, arr, obj) =>
-        Ramda.or(arr, []).includes(Ramda.or(obj, {})[prop])
-    ),
+    ignoreKeysInProject: (projectKey, namesIssueTypeInProject) => `${translate('notKeyInProject', { projectKey })}
+                <br>
+                ${namesIssueTypeInProject.map((name, id) => `<strong>${id + 1})</strong> - ${name}`).join('<br>')}
+                `,
+
+    expandParams: { expand: 'renderedFields' },
+
+    propIn: Ramda.curry((prop, arr, obj) => Ramda.or(arr, []).includes(Ramda.or(obj, {})[prop])),
 
     nonEmptyString: Ramda.both(Ramda.is(String), Ramda.complement(Ramda.isEmpty)),
 
-    getClosedDescriptionBlock: data =>
-        [utils.getOpenedDescriptionBlock(data), LINE_BREAKE_TAG].join(''),
+    getClosedDescriptionBlock: data => [utils.getOpenedDescriptionBlock(data), LINE_BREAKE_TAG].join(''),
 
     getOpenedDescriptionBlock: data => [LINE_BREAKE_TAG, INDENT, data].join(''),
 
@@ -475,16 +468,43 @@ const utils = {
         or <font color="green"><strong>!invite #BBCOM-101:messenger.domain</strong></font><br>
         ${INDENT}Bot invite you in room for issue <font color="green">BBCOM-101</font><br><br>
     If you have administrator status, you can invite the bot into the room and he will not be denied:)
+    <h5>Use "!ignore" command to add project task-types to ignore list. After that hooks form jira will be ignored.<br>
+    example:</h5>
+        ${INDENT}<font color="green"><strong>!ignore</strong></font>
+        ${INDENT}you will see a message:<br>
+        ${INDENT}Current ignore-settings for project "TCP":<br>
+        ${INDENT}${INDENT}1) - Task<br>
+        ${INDENT}${INDENT}2) - Epic<br>
+        ${INDENT}${INDENT}3) - Bug<br>
+        ${INDENT}${INDENT}...<br>
+        ${INDENT}You can use comands add or del types, for example<br>
+        ${INDENT}!ignore add Error<br>
+        ${INDENT}!ignore del Error<br>
+    <h5>Use "!create" command to create new issue in Jira and create links with current issue<br>
+    example:</h5>
+        ${INDENT}<font color="green"><strong>!create</strong></font><br>
+        ${INDENT}you will see a message:<br>
+        ${INDENT}Types of task for project "TCP":<br>
+        ${INDENT}${INDENT}1) - Task<br>
+        ${INDENT}${INDENT}2) - Epic<br>
+        ${INDENT}${INDENT}3) - Bug<br>
+        ${INDENT}${INDENT}...<br>
+        ${INDENT}You can use comands with taskTypes and new name for issue<br>
+        ${INDENT}<font color="green"><strong>!create</strong></font> Task My new task<br>
+        ${INDENT}New link, this task relates to "New-Jira-key" "My new task"
     `,
 };
 
 module.exports = {
     INDENT,
     REDIS_ROOM_KEY,
+    REDIS_IGNORE_PREFIX,
     COMMON_NAME,
     NO_ROOM_PATTERN,
     END_NO_ROOM_PATTERN,
     PING_INTERVAL,
     PING_COUNT,
+    HANDLED_KEY,
+    httpStatus,
     ...utils,
 };

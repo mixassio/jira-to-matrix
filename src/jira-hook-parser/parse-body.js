@@ -7,32 +7,38 @@ module.exports = {
         const issueID = utils.getIssueId(body);
         const comment = utils.getCommentBody(body);
 
-        return {issueID, headerText, comment, author};
+        return { issueID, headerText, comment, author };
     },
 
-    getCreateRoomData: body => {
+    getCreateRoomData: (body, noIssueRoomsMode) => {
         const projectKey = utils.getProjectKey(body);
+        if (noIssueRoomsMode) {
+            const key = utils.getParentIssueKey(body);
+
+            return { issue: { key }, projectKey };
+        }
         const summary = utils.getSummary(body);
         const key = utils.getIssueKey(body);
         const id = utils.getIssueId(body);
         const descriptionFields = utils.getDescriptionFields(body);
 
-        const parsedIssue = {key, id, summary, descriptionFields};
+        const parsedIssue = { key, id, summary, descriptionFields };
 
-        return {issue: parsedIssue, projectKey};
+        return { issue: parsedIssue, projectKey };
     },
 
     getInviteNewMembersData: body => {
+        // const key = features.noIssueRooms ? utils.getParentKey(body) : utils.getKey(body);
         const key = utils.getKey(body);
 
-        return {issue: {key}};
+        return { issue: { key } };
     },
 
     getPostNewLinksData: body => {
         const allLinks = utils.getLinks(body);
         const links = allLinks.map(link => (link ? link.id : link));
 
-        return {links};
+        return { links };
     },
 
     getPostEpicUpdatesData: body => {
@@ -43,9 +49,9 @@ module.exports = {
         const status = utils.getNewStatus(body);
         const name = utils.getDisplayName(body);
 
-        const data = {key, summary, id, name, status};
+        const data = { key, summary, id, name, status };
 
-        return {epicKey, data};
+        return { epicKey, data };
     },
 
     getPostLinkedChangesData: body => {
@@ -57,9 +63,9 @@ module.exports = {
         const name = utils.getDisplayName(body);
         const linksKeys = utils.getLinkKeys(body);
 
-        const data = {status, key, summary, id, changelog, name};
+        const data = { status, key, summary, id, changelog, name };
 
-        return {linksKeys, data};
+        return { linksKeys, data };
     },
 
     getPostProjectUpdatesData: body => {
@@ -70,9 +76,9 @@ module.exports = {
         const status = utils.getNewStatus(body);
         const key = utils.getKey(body);
 
-        const data = {key, summary, name, status};
+        const data = { key, summary, name, status };
 
-        return {typeEvent, projectKey, data};
+        return { typeEvent, projectKey, data };
     },
 
     getPostIssueUpdatesData: body => {
@@ -81,11 +87,12 @@ module.exports = {
         const newKey = utils.getNewKey(body);
         const oldKey = utils.getOldKey(body) || utils.getKey(body);
         const newNameData = newKey
-            ? {key: newKey, summary: utils.getSummary(body)}
-            : utils.getNewSummary(body) &&
-            {key: oldKey, summary: utils.getNewSummary(body)};
+            ? { key: newKey, summary: utils.getSummary(body) }
+            : utils.getNewSummary(body) && { key: oldKey, summary: utils.getNewSummary(body) };
 
-        return {oldKey, newKey, newNameData, changelog, author};
+        const newStatusId = utils.getNewStatusId(body);
+
+        return { oldKey, newKey, newNameData, changelog, author, newStatusId };
     },
 
     getPostLinksDeletedData: body => ({
@@ -94,4 +101,18 @@ module.exports = {
         sourceRelation: utils.getSourceRelation(body),
         destinationRelation: utils.getDestinationRelation(body),
     }),
+
+    getPostParentUpdatesData: body => {
+        const parentKey = utils.getParentKey(body);
+
+        const childData = {
+            key: utils.getIssueKey(body),
+            status: utils.getNewStatus(body),
+            id: utils.getIssueId(body),
+            summary: utils.getSummary(body),
+            name: utils.getDisplayName(body),
+        };
+
+        return { parentKey, childData };
+    },
 };
