@@ -415,6 +415,16 @@ const utils = {
         }
     },
 
+    showQueues: (queueData, queueRooms) => {
+        const messageRooms = queueRooms
+            .map((name, id) => `<strong>${id + 1})</strong> - ${JSON.stringify(name)}`)
+            .join('<br>');
+        const messageTasks = queueData
+            .map((name, id) => `<strong>${id + 1})</strong> - ${JSON.stringify(name)}`)
+            .join('<br>');
+        return translate('showAllQueue', { messageRooms, messageTasks });
+    },
+
     ignoreKeysInProject: (projectKey, namesIssueTypeInProject) => `${translate('notKeyInProject', { projectKey })}
                 <br>
                 ${namesIssueTypeInProject.map((name, id) => `<strong>${id + 1})</strong> - ${name}`).join('<br>')}

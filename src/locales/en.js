@@ -71,6 +71,10 @@ const dict = Object.freeze({
     notCommandRoom: 'This command is not available in current room',
     alive: 'Bot "%{botId}" is connected!!!',
     getInfo: 'All rooms = %{allRooms}<br>Single rooms = %{single}<br>Multiple joined members = %{many}',
+    queueCountsEvents:
+        'Current state for create room - count = %{countRooms}<br>Current state for tasks - count = %{countTasks}',
+    showAllQueue:
+        'Сurrent list of rooms to be created<br>%{messageRooms}<br>Сurrent list other tasks<br>%{messageTasks}',
 });
 
 module.exports.dict = dict;

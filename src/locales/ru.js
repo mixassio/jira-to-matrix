@@ -79,6 +79,10 @@ const dict = Object.freeze({
     notCommandRoom: 'Команда недоступна в этой комнате',
     alive: 'Бот "%{botId}" подключен!!!',
     getInfo: 'Всего комнат = %{allRooms}<br>Только с ботом = %{single}<br>С двумя и более пользователями = %{many}',
+    queueCountsEvents:
+        'Текущее количество задач на создание комнат - %{countRooms}<br>Текущее количество других задач - %{countTasks}',
+    showAllQueue:
+        'Текущий список создаваемых комнат<br>%{messageRooms}<br>Текущий список прочих задач<br>%{messageTasks}',
 });
 /* spell-checker: enable */
 
