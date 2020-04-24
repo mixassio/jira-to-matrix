@@ -1,3 +1,5 @@
+const { matrix } = require('../fixtures/messenger-settings');
+const defaultConfig = require('../../src/config');
 const nock = require('nock');
 const chai = require('chai');
 const sinonChai = require('sinon-chai');
@@ -11,11 +13,11 @@ const {
     LAST_ACTIVE_OPTION,
     DEFAULT_MONTH,
     STATUS_OPTION,
-} = require('../../src/bot/timeline-handler/commands/archive-project');
+} = require('../../src/bot/commands/command-list/archive-project');
 const transitionsJSON = require('../fixtures/jira-api-requests/transitions.json');
 const searchProject = require('../fixtures/jira-api-requests/project-gens/search-project.json');
 
-const commandHandler = require('../../src/bot/timeline-handler');
+const commandHandler = require('../../src/bot/commands');
 const utils = require('../../src/lib/utils');
 
 describe('command project archive test', () => {
@@ -29,8 +31,12 @@ describe('command project archive test', () => {
     const lastStatusName = transitionsJSON.transitions[1].to.name;
 
     beforeEach(() => {
-        chatApi = testUtils.getChatApi();
-        baseOptions = { roomId, roomName, commandName, sender, chatApi, bodyText };
+        const matrixMessengerDataWithRoom = { ...matrix, infoRoom: { name: roomName }, isMaster: true };
+        const roomData = { alias: roomName };
+        const configWithInfo = { ...defaultConfig, messenger: matrixMessengerDataWithRoom };
+
+        chatApi = testUtils.getChatApi({ config: configWithInfo });
+        baseOptions = { roomId, roomData, commandName, sender, chatApi, bodyText, config: configWithInfo };
         const lastIssueKey = searchProject.issues[0].key;
         nock(utils.getRestUrl())
             .get(`/search?jql=project=${bodyText}`)
@@ -46,10 +52,21 @@ describe('command project archive test', () => {
         await testUtils.cleanRedis();
     });
 
-    it('Expect archive return roomNotExistOrPermDen message if no jira project exists', async () => {
+    it('Expect archiveproject return ignoreCommand message if command is ignore list', async () => {
+        const result = await commandHandler({
+            ...baseOptions,
+            bodyText: 'olololo',
+            config: { ignoreCommands: [commandName] },
+        });
+
+        expect(result).to.be.eq(translate('ignoreCommand', { commandName }));
+        expect(await getArchiveProject()).to.be.empty;
+    });
+
+    it('Expect archive return issueNotExistOrPermDen message if no jira project exists', async () => {
         const result = await commandHandler({ ...baseOptions, bodyText: 'olololo' });
 
-        expect(result).to.be.eq(translate('roomNotExistOrPermDen'));
+        expect(result).to.be.eq(translate('issueNotExistOrPermDen'));
         expect(await getArchiveProject()).to.be.empty;
     });
 
@@ -67,6 +84,15 @@ describe('command project archive test', () => {
 
         expect(result).to.be.eq(expected);
         expect(await getArchiveProject()).not.to.includes(bodyText);
+    });
+
+    it('expect return unknownArgs message if body text have multiple unexpected words', async () => {
+        const text = 'lallaal oooo -labc';
+        const result = await commandHandler({
+            ...baseOptions,
+            bodyText: [`--${LAST_ACTIVE_OPTION}`, text].join(' '),
+        });
+        expect(result).to.be.eq(translate('unknownArgs', { unknownArgs: text.split(' ') }));
     });
 
     it('Expect archive return warning message if body month is not valid', async () => {
@@ -113,5 +139,18 @@ describe('command project archive test', () => {
 
         expect(result).to.be.eq(expected);
         expect(await getArchiveProject()).to.be.empty;
+    });
+
+    it('Expect return error message if room is not command', async () => {
+        const result = await commandHandler({ ...baseOptions, roomData: { alias: 'some other room' } });
+
+        expect(result).to.be.eq(translate('notCommandRoom'));
+    });
+
+    it('Expect return nothing if bot is not master', async () => {
+        chatApi.isMaster = () => false;
+        const result = await commandHandler(baseOptions);
+
+        expect(result).to.be.undefined;
     });
 });

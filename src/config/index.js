@@ -14,7 +14,8 @@ const configData = require(configFilepath);
 
 const defaultConfigData = {
     delayInterval: 500,
-    pathToDocs: 'https://github.com/mobitel/jira-to-matrix/blob/master/docs',
+    pathToDocs: 'https://github.com/mobitel-ltd/jira-to-matrix/tree/master/docs',
+    ignoreCommands: [],
 };
 
 const composeConfig = baseConfig => {
@@ -24,7 +25,7 @@ const composeConfig = baseConfig => {
 
     const config = { ...defaultConfigData, ...baseConfig };
 
-    const workerBot = { user: config.messenger.user, password: config.messenger.password };
+    const workerBot = { user: config.messenger.user, password: config.messenger.password, isMaster: true };
     const historicBots = config.messenger.bots || [];
     // this helps not to use bot in list when we try to check if he is in the room
     const fileredHistoric = historicBots.filter(item => !(item.user === workerBot.user));

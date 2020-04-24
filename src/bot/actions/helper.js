@@ -1,9 +1,8 @@
 const htmlToText = require('html-to-text').fromString;
-const Ramda = require('ramda');
+const R = require('ramda');
 const logger = require('../../modules/log.js')(module);
 const translate = require('../../locales');
 const marked = require('marked');
-// const { usersToIgnore, testMode } = require('../../config');
 const utils = require('../../lib/utils.js');
 const jiraRequests = require('../../lib/jira-request.js');
 const redis = require('../../redis-client');
@@ -248,9 +247,9 @@ const helper = {
     getCommentHTMLBody: (headerText, commentBody) => `${headerText}: <br>${commentBody}`,
 
     getCommentBody: (issue, comment) => {
-        const comments = Ramda.path(['renderedFields', 'comment', 'comments'], issue);
+        const comments = R.path(['renderedFields', 'comment', 'comments'], issue);
 
-        const result = Ramda.propOr(comment.body, 'body', Ramda.find(Ramda.propEq('id', comment.id), comments));
+        const result = R.propOr(comment.body, 'body', R.find(R.propEq('id', comment.id), comments));
 
         return result;
     },

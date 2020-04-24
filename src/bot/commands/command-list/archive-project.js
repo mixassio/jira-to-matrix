@@ -1,8 +1,10 @@
+/* eslint-disable id-length */
 const { DateTime } = require('luxon');
 const { setArchiveProject } = require('../../settings');
 const jiraRequests = require('../../../lib/jira-request');
 const translate = require('../../../locales');
 const logger = require('../../../modules/log')(module);
+const { parseBodyText } = require('./common-actions');
 
 const DEFAULT_MONTH = 3;
 
@@ -18,35 +20,36 @@ const getValidateMonth = data => {
     return Number.isInteger(numeric) && numeric;
 };
 
-const parseBodyText = bodyText => {
-    const [param, ...optionWithParams] = bodyText
-        .split('--')
-        .filter(Boolean)
-        .map(el => el.trim());
-    const options = optionWithParams
-        .map(el => {
-            const [optionName, ...optionParams] = el.split(' ').filter(Boolean);
+const projectarchive = async ({ bodyText, sender, chatApi, roomData }) => {
+    if (!chatApi.isMaster()) {
+        logger.warn('Skip operation for not master bot');
 
-            return {
-                [optionName]: optionParams.join(' '),
-            };
-        })
-        .reduce((acc, val) => ({ ...acc, ...val }), {});
+        return;
+    }
 
-    return {
-        param,
-        options,
-    };
-};
+    if (chatApi.getCommandRoomName() !== roomData.alias) {
+        return translate('notCommandRoom');
+    }
 
-const projectarchive = async ({ bodyText, sender, chatApi }) => {
     if (!bodyText) {
         return translate('emptyProject');
     }
 
-    const data = parseBodyText(bodyText);
-    const projectKey = data.param;
-    const customMonths = data.options[LAST_ACTIVE_OPTION];
+    const textOptions = parseBodyText(bodyText, {
+        alias: {
+            l: LAST_ACTIVE_OPTION,
+            s: STATUS_OPTION,
+        },
+        string: [LAST_ACTIVE_OPTION, STATUS_OPTION],
+        first: true,
+    });
+
+    if (textOptions.hasUnknown()) {
+        return translate('unknownArgs', { unknownArgs: textOptions.unknown });
+    }
+
+    const projectKey = textOptions.param;
+    const customMonths = textOptions.get(LAST_ACTIVE_OPTION);
 
     const month = getValidateMonth(customMonths);
     if (!month) {
@@ -58,15 +61,15 @@ const projectarchive = async ({ bodyText, sender, chatApi }) => {
     if (!(await jiraRequests.isJiraPartExists(projectKey))) {
         logger.warn(`Command archiveproject was made with incorrect project ${projectKey}`);
 
-        return translate('roomNotExistOrPermDen');
+        return translate('issueNotExistOrPermDen');
     }
 
     const keepTimestamp = DateTime.local()
         .minus({ month })
         .toMillis();
 
-    if (data.options[STATUS_OPTION]) {
-        const status = data.options[STATUS_OPTION];
+    if (textOptions.has(STATUS_OPTION)) {
+        const status = textOptions.get(STATUS_OPTION);
         if (!(await jiraRequests.hasStatusInProject(projectKey, status))) {
             logger.warn(`Command archiveproject was made with incorrect option arg ${status}`);
 
@@ -83,4 +86,4 @@ const projectarchive = async ({ bodyText, sender, chatApi }) => {
     return translate('successProjectAddToArchive', { projectKey, activeTime: month });
 };
 
-module.exports = { projectarchive, parseBodyText, LAST_ACTIVE_OPTION, DEFAULT_MONTH, STATUS_OPTION };
+module.exports = { projectarchive, LAST_ACTIVE_OPTION, DEFAULT_MONTH, STATUS_OPTION };

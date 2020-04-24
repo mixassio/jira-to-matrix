@@ -1,3 +1,4 @@
+/* eslint-disable no-empty-function */
 /* eslint-disable handle-callback-err */
 const faker = require('faker');
 const R = require('ramda');
@@ -105,6 +106,7 @@ module.exports = {
             getChatUserId: stub().callsFake(realChatApi.getChatUserId.bind(realChatApi)),
             getRoomIdByName: stub().resolves(false),
             composeRoomName: stub().callsFake(realChatApi.composeRoomName.bind(realChatApi)),
+            isMaster: realChatApi.isMaster(),
             getAdmins: realChatApi.getAdmins(),
             getMyId: realChatApi.getMyId(),
             getBotId: realChatApi.getBotId(),
@@ -120,22 +122,32 @@ module.exports = {
             kickUserByRoom: stub().callsFake(userId => userId),
             getRoomDataById: stub(),
         });
+        chatApi.getRoomAndClient = stub();
 
         const allMembers = [...roomAdmins, ...defaultExistedUsers].map(({ userId, name }) =>
             chatApi.getChatUserId(userId || name),
         );
         chatApi.getRoomMembers = stub().resolves(allMembers);
 
-        allRoomIds.forEach(id =>
-            chatApi.getRoomDataById.withArgs(id).resolves({
+        const allMembersWithPower = [
+            ...allMembers.map(userId => ({ userId, powerLevel: 50 })),
+            { userId: chatApi.getMyId(), powerLevel: 100 },
+        ];
+
+        allRoomIds.forEach(id => {
+            const roomData = {
                 alias: allAliases.find(key => rooms[key] === id),
                 id,
-                members: allMembers.map(userId => ({ userId, powerLevel: 50 })),
-            }),
-        );
+                members: allMembersWithPower,
+            };
+            chatApi.getRoomDataById.withArgs(id).resolves(roomData);
+            chatApi.getRoomAndClient.resolves({
+                roomData,
+                client: chatApi,
+            });
+        });
 
         chatApi.getRoomIdForJoinedRoom = stub().throws('No bot in room with id');
-        // console.log('TCL: stubInstance', chatApi);
         existedUsers.map(({ displayName, userId }) =>
             chatApi.getUser.withArgs(chatApi.getChatUserId(userId)).resolves(true),
         );
@@ -170,13 +182,11 @@ module.exports = {
 
     startGitServer: tmpDirName => {
         const repoDir = path.resolve(__dirname, tmpDirName);
-        // console.log('repoDir', repoDir);
         const repos = new Server(repoDir, {
             autoCreate: true,
         });
 
         repos.on('push', push => {
-            // console.log(`push ${push.repo}${push.commit} (${push.branch})`);
             repos.list((err, results) => {
                 push.log(' ');
                 push.log('Hey!');
@@ -191,14 +201,10 @@ module.exports = {
         });
 
         repos.on('fetch', fetch => {
-            // console.log('fetch', fetch);
-            // console.log(`fetch ${fetch.commit}`);
             fetch.accept();
         });
 
-        repos.listen(settings.gitServerPort, () => {
-            // console.log(`node-git-server running at http:localhost:${settings.gitServerPort}`);
-        });
+        repos.listen(settings.gitServerPort, () => {});
 
         return repos;
     },

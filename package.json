@@ -16,6 +16,7 @@
     "debug": "nodemon --inspect src/app.js",
     "test-single": "NODE_ENV=test nyc mocha",
     "test": "NODE_ENV=test nyc mocha --timeout 10000  test/* --exit",
+    "test-all": "TEST_WATCH=1 npm run test",
     "report-coverage": "nyc report --reporter=text-lcov > coverage.lcov && codecov"
   },
   "repository": {
@@ -27,13 +28,12 @@
       "src/redis-client.js",
       "src/modules/log.js",
       "src/config",
-      "src/timeline-handler/commands/help.js",
       "test"
     ]
   },
   "pre-commit": [
     "lint",
-    "test"
+    "test-all"
   ],
   "devDependencies": {
     "chai": "^4.2.0",
@@ -70,6 +70,7 @@
     "luxon": "^1.22.2",
     "marked": "^0.8.0",
     "matrix-js-sdk": "mobitel-ltd/matrix-js-sdk",
+    "minimist": "^1.2.5",
     "node-polyglot": "^2.4.0",
     "ramda": "^0.27.0",
     "redis": "^3.0.2",

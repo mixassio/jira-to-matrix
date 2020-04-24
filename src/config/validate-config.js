@@ -41,6 +41,7 @@ const schema = obj({
             ignoreDestStatusCat: array(Joi.number().integer()),
         }),
     }),
+    ignoreCommands: array(string).optional(),
     usersToIgnore: array(Joi.string()),
     inviteIgnoreUsers: array(Joi.string()),
     testMode: obj({
@@ -102,6 +103,9 @@ const schema = obj({
         protocol: string.optional(),
         gitReposName: string.optional(),
         baseDir: string.optional(),
+        options: objOptional({
+            lastIssue: array(string).optional(),
+        }),
     },
     delayInterval: int.optional(),
 });

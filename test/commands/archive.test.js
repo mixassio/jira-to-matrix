@@ -17,47 +17,34 @@ const testUtils = require('../test-utils');
 const issueJSON = require('../fixtures/jira-api-requests/issue.json');
 const projectJSON = require('../fixtures/jira-api-requests/project.json');
 
+const { deleteAlias, KICK_ALL_OPTION, PERSONAL_REPO_OPTION } = require('../../src/bot/commands/command-list/archive');
 const {
-    getGroupedUsers,
-    deleteAlias,
-    // getHTMLtext,
-    getMDtext,
-    gitPullToRepo,
-    EVENTS_DIR_NAME,
-    MEDIA_DIR_NAME,
-    KICK_ALL_OPTION,
-    VIEW_FILE_NAME,
-    transformEvent,
-    getImageData,
-    FILE_DELIMETER,
-    DEFAULT_EXT,
     DEFAULT_REMOTE_NAME,
-    getRoomMainInfoMd,
-} = require('../../src/bot/timeline-handler/commands/archive');
+    DEFAULT_EXT,
+    EVENTS_DIR_NAME,
+    VIEW_FILE_NAME,
+    MEDIA_DIR_NAME,
+    FILE_DELIMETER,
+} = require('../../src/lib/git-lib');
 
 const rawEvents = require('../fixtures/archiveRoom/raw-events');
 const rawEventsData = require('../fixtures/archiveRoom/raw-events-data');
-const commandHandler = require('../../src/bot/timeline-handler');
+const commandHandler = require('../../src/bot/commands');
 const utils = require('../../src/lib/utils');
-// const messagesJSON = require('../fixtures/archiveRoom/allMessagesFromRoom.json');
-const messagesMD = fs.readFileSync(path.resolve(__dirname, '../fixtures/archiveRoom/allMessagesFromRoom.md'), 'utf8');
-const infoMd = fs.readFileSync(path.resolve(__dirname, '../fixtures/archiveRoom/room-info.md'), 'utf8');
 const messagesWithBefore = fs.readFileSync(
     path.resolve(__dirname, '../fixtures/archiveRoom/withbefore-readme.md'),
     'utf8',
 );
+const readmeWithoutBefore = fs.readFileSync(path.resolve(__dirname, '../fixtures/archiveRoom/readme.md'), 'utf8');
 const eventBefore = require('../fixtures/archiveRoom/already-exisits-git/res/$yQ0EVRodM3N5B2Id1M-XOvBlxAhFLy_Ex8fYqmrx5iA.json');
 
-// const messagesHTML = fs.readFileSync(
-//     path.resolve(__dirname, '../fixtures/archiveRoom/allMessagesFromRoom.html'),
-//     'utf8',
-// );
 const fsProm = fs.promises;
 
 describe('Archive command', () => {
+    const kickAllWithPref = `--${KICK_ALL_OPTION}`;
     let chatApi;
     const roomName = issueJSON.key;
-    const sender = getUserIdByDisplayName(issueJSON.fields.creator);
+    const sender = getUserIdByDisplayName(issueJSON.fields.creator.displayname);
     const roomId = testUtils.getRoomId();
     const commandName = 'archive';
     let baseOptions;
@@ -158,7 +145,7 @@ describe('Archive command', () => {
     });
 
     it('Permition denided if sender and bot not in task jira', async () => {
-        const post = translate('roomNotExistOrPermDen');
+        const post = translate('issueNotExistOrPermDen');
         const notAvailableIssueKey = `${projectKey}-1010`;
         const roomDataWithNotExistAlias = { ...roomData, alias: notAvailableIssueKey };
         const result = await commandHandler({
@@ -180,93 +167,76 @@ describe('Archive command', () => {
         expect(result).to.be.eq(post);
     });
 
-    it('transform event', () => {
-        const res = rawEvents.map(transformEvent);
-        res.forEach(element => {
-            expect(element).not.includes('"age"');
+    it('expect return repoNotExists if repo is not exists', async () => {
+        const repoLink = `${config.baseLink}/${projectKey.toLowerCase()}`;
+        const post = translate('repoNotExists', { repoLink });
+        const result = await commandHandler({
+            ...baseOptions,
+            config: { ...config, baseRemote: 'lalalla' },
+            sender: adminSender.name,
         });
+        expect(result).to.be.eq(post);
     });
 
-    it('groupUsers test', () => {
-        const admins = Array.from({ length: 5 }, () => ({ userId: faker.random.alphaNumeric(10), powerLevel: 100 }));
-        const simpleUsers = Array.from({ length: 5 }, () => ({
-            userId: faker.random.alphaNumeric(10),
-            powerLevel: faker.random.number(99),
-        }));
-        const bot = Array.from({ length: 1 }, () => ({ userId: faker.random.alphaNumeric(10), powerLevel: 100 }));
-        const data = [...bot, ...admins, ...simpleUsers];
-
-        const expectedData = {
-            simpleUsers: simpleUsers.map(user => user.userId),
-            bot: bot.map(user => user.userId),
-            admins: admins.map(user => user.userId),
-        };
-
-        expect(getGroupedUsers(data, bot[0].userId)).deep.eq(expectedData);
-    });
-
-    it('groupUsers test return empty array for each group if no such user exists', () => {
-        const bot = Array.from({ length: 1 }, () => ({ userId: faker.random.alphaNumeric(10), powerLevel: 100 }));
-        const data = bot;
-
-        const expectedData = {
-            simpleUsers: [],
-            bot: bot.map(user => user.userId),
-            admins: [],
-        };
-
-        expect(getGroupedUsers(data, bot[0].userId)).deep.eq(expectedData);
-    });
-
-    it('getFileNameByUrl', () => {
-        const eventData = rawEvents.map(el => getImageData(el)).filter(Boolean);
-        expect(eventData).to.have.deep.members([
-            {
-                url: rawEventsData.blobUrl,
-                fileName: `${rawEventsData.blobId}${FILE_DELIMETER}${rawEventsData.blobName}`,
-                imageName: rawEventsData.blobName,
-                skip: true,
-            },
-            {
-                url: rawEventsData.avatarUrl,
-                imageName: undefined,
-                fileName: `${rawEventsData.avatarId}${DEFAULT_EXT}`,
-            },
-            {
-                url: rawEventsData.imgUrl,
-                imageName: rawEventsData.mediaName,
-                fileName: `${rawEventsData.mediaId}${FILE_DELIMETER}${rawEventsData.mediaName}`,
-            },
-        ]);
-    });
-
-    describe('Render list of messages', () => {
-        it('Render MD', () => {
-            const result = getMDtext(rawEvents).split('\n');
-            expect(result).to.deep.equal(messagesMD.split('\n'));
+    it('expect return unknownArgs message body text have unexpected words', async () => {
+        const text = 'lallaal';
+        const result = await commandHandler({
+            ...baseOptions,
+            sender: adminSender.name,
+            bodyText: text,
         });
-
-        it('Render info MD', () => {
-            const result = getRoomMainInfoMd(roomData).split('\n');
-            expect(result).to.deep.equal(infoMd.split('\n'));
-        });
-
-        // it.skip('Render HTML', () => {
-        //     const result = getHTMLtext(messagesJSON);
-        //     expect(result).to.deep.equal(messagesHTML);
-        // });
+        expect(result).to.be.eq(translate('unknownArgs', { unknownArgs: text }));
     });
 
-    describe('gitPull', () => {
-        const expectedRemote = `${config.baseRemote}/${projectKey.toLowerCase()}.git`;
-        const expectedRepoLink = `${config.baseLink}/${projectKey.toLowerCase()}/tree/master/${issueKey}`;
-        const expectedDefaultRemote = `${config.baseRemote}/${DEFAULT_REMOTE_NAME}.git`;
-        const expectedDefaultRepoLink = `${config.baseLink}/${DEFAULT_REMOTE_NAME}/tree/master/${issueKey}`;
+    it('expect return unknownArgs message if body text have multiple unexpected words', async () => {
+        const text = 'lallaal oooo -kickall';
+        const result = await commandHandler({
+            ...baseOptions,
+            sender: adminSender.name,
+            bodyText: [kickAllWithPref, text].join(' '),
+        });
+        expect(result).to.be.eq(translate('unknownArgs', { unknownArgs: text.split(' ') }));
+    });
+
+    it('expect return unknownArgs message if body text have multiple unexpected words around', async () => {
+        const text1 = 'lallaal oooo -kickall';
+        const text2 = '-h';
+        const result = await commandHandler({
+            ...baseOptions,
+            sender: adminSender.name,
+            bodyText: [text1, kickAllWithPref, text2].join(' '),
+        });
+        expect(result).to.be.eq(translate('unknownArgs', { unknownArgs: `${text1} ${text2}`.split(' ') }));
+    });
+
+    it('expect return unknownArgs message if body have option with one -', async () => {
+        const result = await commandHandler({
+            ...baseOptions,
+            sender: adminSender.name,
+            bodyText: `-${KICK_ALL_OPTION}`,
+        });
+        expect(result).to.be.eq(translate('unknownArgs', { unknownArgs: `-${KICK_ALL_OPTION}` }));
+    });
+
+    describe('archive with export', () => {
+        let expectedRemote;
+        let expectedRepoLink;
+        let expectedDefaultRemote;
+        let expectedRemoteWithCustomName;
+        let expectedRepoLinkWithCustomName;
         let server;
         let tmpDir;
         let configWithTmpPath;
 
         beforeEach(async () => {
+            const _repoName = chatApi.getChatUserId(adminSender.name).replace(/[^a-z0-9_.-]+/g, '__');
+            const repoName = _repoName[0] === '_' ? _repoName.slice(2) : _repoName;
+
+            expectedRemote = `${config.baseRemote}/${projectKey.toLowerCase()}.git`;
+            expectedRepoLink = `${config.baseLink}/${projectKey.toLowerCase()}/tree/master/${issueKey}`;
+            expectedDefaultRemote = `${config.baseRemote}/${DEFAULT_REMOTE_NAME}.git`;
+            expectedRemoteWithCustomName = `${config.baseRemote}/${repoName.toLowerCase()}.git`;
+            expectedRepoLinkWithCustomName = `${config.baseLink}/${repoName.toLowerCase()}/tree/master/${issueKey}`;
             tmpDir = await tmp.dir({ unsafeCleanup: true });
             configWithTmpPath = { ...config, gitReposPath: tmpDir.path };
 
@@ -281,70 +251,6 @@ describe('Archive command', () => {
         afterEach(() => {
             server.close();
             tmpDir.cleanup();
-        });
-
-        it('expect git pull send event data', async () => {
-            const isJira = true;
-            const linkToRepo = await gitPullToRepo(configWithTmpPath, rawEvents, roomData, chatApi, isJira);
-
-            expect(linkToRepo).to.eq(expectedRepoLink);
-
-            const cloneName = 'clone-repo';
-            const gitLocal = gitSimple(tmpDir.path);
-            await gitLocal.clone(expectedRemote, cloneName);
-            const files = await fsProm.readdir(path.resolve(tmpDir.path, cloneName, issueKey, EVENTS_DIR_NAME));
-            const allEvents = [...rawEvents, eventBefore].map(event => `${event.event_id}.json`);
-            expect(files).to.have.length(allEvents.length);
-            expect(files).to.have.deep.members(allEvents);
-
-            const viewFilePath = path.resolve(tmpDir.path, cloneName, issueKey, VIEW_FILE_NAME);
-            expect(fs.existsSync(viewFilePath)).to.be.true;
-            const viewFileData = (await fsProm.readFile(viewFilePath, 'utf8')).split('\n');
-            expect(viewFileData).to.deep.equal(messagesWithBefore.split('\n'));
-
-            const mediaFiles = await fsProm.readdir(path.resolve(tmpDir.path, cloneName, issueKey, MEDIA_DIR_NAME));
-            const expectedMediaFileNames = [
-                `${rawEventsData.mediaId}${FILE_DELIMETER}${rawEventsData.mediaName}`,
-                `${rawEventsData.blobId}${FILE_DELIMETER}${rawEventsData.blobName}`,
-                `${rawEventsData.avatarId}${DEFAULT_EXT}`,
-            ];
-            expect(mediaFiles).to.have.length(expectedMediaFileNames.length);
-            expect(mediaFiles).to.have.deep.members(expectedMediaFileNames);
-        });
-
-        it('expect git pull send event data', async () => {
-            const isJira = false;
-            const linkToRepo = await gitPullToRepo(
-                configWithTmpPath,
-                [...rawEvents, eventBefore],
-                roomData,
-                chatApi,
-                isJira,
-            );
-
-            expect(linkToRepo).to.eq(expectedDefaultRepoLink);
-
-            const cloneName = 'clone-repo';
-            const gitLocal = gitSimple(tmpDir.path);
-            await gitLocal.clone(expectedDefaultRemote, cloneName);
-            const files = await fsProm.readdir(path.resolve(tmpDir.path, cloneName, issueKey, EVENTS_DIR_NAME));
-            const allEvents = [...rawEvents, eventBefore].map(event => `${event.event_id}.json`);
-            expect(files).to.have.length(allEvents.length);
-            expect(files).to.have.deep.members(allEvents);
-
-            const viewFilePath = path.resolve(tmpDir.path, cloneName, issueKey, VIEW_FILE_NAME);
-            expect(fs.existsSync(viewFilePath)).to.be.true;
-            const viewFileData = (await fsProm.readFile(viewFilePath, 'utf8')).split('\n');
-            expect(viewFileData).to.deep.equal(messagesWithBefore.split('\n'));
-
-            const mediaFiles = await fsProm.readdir(path.resolve(tmpDir.path, cloneName, issueKey, MEDIA_DIR_NAME));
-            const expectedMediaFileNames = [
-                `${rawEventsData.mediaId}${FILE_DELIMETER}${rawEventsData.mediaName}`,
-                `${rawEventsData.blobId}${FILE_DELIMETER}${rawEventsData.blobName}`,
-                `${rawEventsData.avatarId}${DEFAULT_EXT}`,
-            ];
-            expect(mediaFiles).to.have.length(expectedMediaFileNames.length);
-            expect(mediaFiles).to.have.deep.members(expectedMediaFileNames);
         });
 
         it('expect command succeded', async () => {
@@ -382,13 +288,99 @@ describe('Archive command', () => {
             expect(chatApi.sendHtmlMessage).to.be.calledWithExactly(roomId, expectedMsg, expectedMsg);
         });
 
-        it('expect command succeded and all simple membera are kicked but admins not if they are exists', async () => {
+        it('expect command succeded with custom repo name as option and kick all option', async () => {
+            const bodyText = `${faker.random.arrayElement([
+                `--${PERSONAL_REPO_OPTION}`,
+                '-p',
+            ])} ${faker.random.arrayElement([kickAllWithPref, '-k'])}`;
+            const result = await commandHandler({
+                ...baseOptions,
+                sender: adminSender.name,
+                roomName: issueKey,
+                config: configWithTmpPath,
+                bodyText,
+            });
+
+            expect(result).to.be.undefined;
+
+            const cloneName = 'clone-repo';
+            const gitLocal = gitSimple(tmpDir.path);
+            await gitLocal.clone(expectedRemoteWithCustomName, cloneName);
+            const files = await fsProm.readdir(path.resolve(tmpDir.path, cloneName, issueKey, EVENTS_DIR_NAME));
+            const allEvents = rawEvents.map(event => `${event.event_id}.json`);
+            expect(files).to.have.length(allEvents.length);
+            expect(files).to.have.deep.members(allEvents);
+
+            const viewFilePath = path.resolve(tmpDir.path, cloneName, issueKey, VIEW_FILE_NAME);
+            expect(fs.existsSync(viewFilePath)).to.be.true;
+            const viewFileData = (await fsProm.readFile(viewFilePath, 'utf8')).split('\n');
+            expect(viewFileData).to.deep.equal(readmeWithoutBefore.split('\n'));
+
+            const mediaFiles = await fsProm.readdir(path.resolve(tmpDir.path, cloneName, issueKey, MEDIA_DIR_NAME));
+            const expectedMediaFileNames = [
+                `${rawEventsData.mediaId}${FILE_DELIMETER}${rawEventsData.mediaName}`,
+                `${rawEventsData.blobId}${FILE_DELIMETER}${rawEventsData.blobName}`,
+                `${rawEventsData.avatarId}${DEFAULT_EXT}`,
+            ];
+            expect(mediaFiles).to.have.length(expectedMediaFileNames.length);
+            expect(mediaFiles).to.have.deep.members(expectedMediaFileNames);
+            simpleMembers.forEach(({ userId }) =>
+                expect(chatApi.kickUserByRoom).to.be.calledWithExactly({ roomId, userId }),
+            );
+            expect(chatApi.deleteRoomAlias).not.to.be.called;
+            expect(chatApi.leaveRoom).to.be.calledWithExactly(roomData.id);
+            const expectedMsg = [
+                translate('successExport', { link: expectedRepoLinkWithCustomName }),
+                translate('adminsAreNotKicked'),
+            ].join('<br>');
+            expect(chatApi.sendHtmlMessage).to.be.calledWithExactly(roomId, expectedMsg, expectedMsg);
+        });
+
+        it('expect command succeded with custom repo name as option', async () => {
+            const bodyText = faker.random.arrayElement([`--${PERSONAL_REPO_OPTION}`, '-p']);
+            const result = await commandHandler({
+                ...baseOptions,
+                sender: adminSender.name,
+                roomName: issueKey,
+                config: configWithTmpPath,
+                bodyText,
+            });
+            const expectedMsg = translate('successExport', { link: expectedRepoLinkWithCustomName });
+
+            expect(result).to.be.eq(expectedMsg);
+
+            const cloneName = 'clone-repo';
+            const gitLocal = gitSimple(tmpDir.path);
+            await gitLocal.clone(expectedRemoteWithCustomName, cloneName);
+            const files = await fsProm.readdir(path.resolve(tmpDir.path, cloneName, issueKey, EVENTS_DIR_NAME));
+            const allEvents = rawEvents.map(event => `${event.event_id}.json`);
+            expect(files).to.have.length(allEvents.length);
+            expect(files).to.have.deep.members(allEvents);
+
+            const viewFilePath = path.resolve(tmpDir.path, cloneName, issueKey, VIEW_FILE_NAME);
+            expect(fs.existsSync(viewFilePath)).to.be.true;
+            const viewFileData = (await fsProm.readFile(viewFilePath, 'utf8')).split('\n');
+            expect(viewFileData).to.deep.equal(readmeWithoutBefore.split('\n'));
+
+            const mediaFiles = await fsProm.readdir(path.resolve(tmpDir.path, cloneName, issueKey, MEDIA_DIR_NAME));
+            const expectedMediaFileNames = [
+                `${rawEventsData.mediaId}${FILE_DELIMETER}${rawEventsData.mediaName}`,
+                `${rawEventsData.blobId}${FILE_DELIMETER}${rawEventsData.blobName}`,
+                `${rawEventsData.avatarId}${DEFAULT_EXT}`,
+            ];
+            expect(mediaFiles).to.have.length(expectedMediaFileNames.length);
+            expect(mediaFiles).to.have.deep.members(expectedMediaFileNames);
+            expect(chatApi.sendHtmlMessage).to.be.calledWithExactly(roomId, expectedMsg, expectedMsg);
+        });
+
+        it('expect command succeded and all simple members are kicked but admins not if they are exists', async () => {
             const roomName = issueKey;
+            const bodyText = faker.random.arrayElement([kickAllWithPref, '-k']);
             const result = await commandHandler({
                 ...baseOptions,
                 roomName,
                 sender: adminSender.name,
-                bodyText: KICK_ALL_OPTION,
+                bodyText,
                 config: configWithTmpPath,
             });
 
@@ -429,6 +421,7 @@ describe('Archive command', () => {
 
         it('expect command succeded and all users are kicked if not other admins but alias is not deleted but saved', async () => {
             const roomName = issueKey;
+            const bodyText = faker.random.arrayElement([kickAllWithPref, '-k']);
             const roomDataWihotAdmins = {
                 ...roomData,
                 members: [
@@ -444,7 +437,7 @@ describe('Archive command', () => {
                 roomData: roomDataWihotAdmins,
                 roomName,
                 sender: adminSender.name,
-                bodyText: KICK_ALL_OPTION,
+                bodyText,
                 config: configWithTmpPath,
             });
             expect(result).to.be.undefined;
@@ -475,6 +468,7 @@ describe('Archive command', () => {
         });
 
         it('expect command succeded but bot cannot kick anybody if power is less than 100', async () => {
+            const bodyText = faker.random.arrayElement([kickAllWithPref, '-k']);
             const roomName = issueKey;
             const roomDataWihLessPower = {
                 ...roomData,
@@ -492,7 +486,7 @@ describe('Archive command', () => {
                 roomName,
                 sender: adminSender.name,
                 config: configWithTmpPath,
-                bodyText: KICK_ALL_OPTION,
+                bodyText,
             });
             const expectedMsg = [
                 translate('successExport', { link: expectedRepoLink }),

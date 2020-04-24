@@ -1,16 +1,11 @@
-// @ts-check
-
 const isImage = require('is-image');
 const fileSystem = require('fs');
 const path = require('path');
 const R = require('ramda');
 const git = require('simple-git/promise');
-const jiraRequests = require('../../../lib/jira-request');
-const utils = require('../../../lib/utils');
-const translate = require('../../../locales');
-const logger = require('../../../modules/log.js')(module);
-const { fileRequest } = require('../../../lib/request');
-const { setAlias } = require('../../settings');
+const utils = require('./utils');
+const logger = require('../modules/log.js')(module);
+const { fileRequest } = require('./request');
 
 const fs = fileSystem.promises;
 
@@ -19,14 +14,7 @@ const EVENTS_DIR_NAME = 'res';
 const MEDIA_DIR_NAME = 'media';
 const FILE_DELIMETER = '__';
 const DEFAULT_EXT = '.png';
-const KICK_ALL_OPTION = 'kickall';
 const VIEW_FILE_NAME = 'README.md';
-const NO_OPTION = 'No option';
-const NO_POWER = 'No power';
-const ADMINS_EXISTS = 'admins exists';
-const ALL_DELETED = 'all deleted';
-
-const EXPECTED_POWER = 100;
 
 const getName = (url, delim) => R.pipe(R.split(delim), R.last)(url);
 
@@ -125,11 +113,11 @@ const getProjectRemote = (baseRemote, projectKey) => {
     return [baseRemote, projectExt].join('/');
 };
 
-const getRepoLink = (baseLink, projectKey, roomName) => {
+const getRepoLink = (baseLink, projectKey = DEFAULT_REMOTE_NAME, roomName) => {
     const projectExt = projectKey.toLowerCase();
+    const args = roomName ? [baseLink, projectExt, 'tree', 'master', roomName] : [baseLink, projectExt];
 
-    // to get link visible
-    return [baseLink, projectExt, 'tree', 'master', roomName].join('/');
+    return args.join('/');
 };
 
 // It helps remove all property which dynamically created by the moment of archive
@@ -250,16 +238,17 @@ const getRepoPath = async (repoName, { baseRemote, gitReposPath }) => {
     return repoPath;
 };
 
-const gitPullToRepo = async (
-    { baseRemote, baseLink, gitReposPath },
+const exportEvents = async ({
     listEvents,
+    baseRemote,
+    baseLink,
+    gitReposPath,
     roomData,
     chatApi,
-    isRoomJiraProject,
-) => {
+    repoName = DEFAULT_REMOTE_NAME,
+}) => {
     try {
-        const projectKey = isRoomJiraProject ? utils.getProjectKeyFromIssueKey(roomData.alias) : DEFAULT_REMOTE_NAME;
-        const repoPath = await getRepoPath(projectKey, { baseRemote, gitReposPath });
+        const repoPath = await getRepoPath(repoName, { baseRemote, gitReposPath });
         const repoRoomPath = path.resolve(repoPath, roomData.alias);
 
         const createdFileNames = await writeEventsData(listEvents, repoRoomPath, chatApi, roomData);
@@ -274,173 +263,42 @@ const gitPullToRepo = async (
         await repoGit.commit(`set event data for room ${roomData.alias}`);
         await repoGit.push('origin', 'master');
 
-        const link = getRepoLink(baseLink, projectKey, roomData.alias);
+        const link = getRepoLink(baseLink, repoName, roomData.alias);
 
         return link;
     } catch (err) {
-        const msg = utils.errorTracing(`gitPullToRepo ${roomData.alias}`, err);
+        const msg = utils.errorTracing(`exportEvents ${roomData.alias}`, err);
         logger.error(msg);
     }
 };
 
-/**
- * @param {{userId: string, powerLevel: number}[]} members room members
- * @param {string} botId bot user Id
- * @returns {{simpleUsers: string[], admins: string[], bot: string[]}} grouped users
- */
-const getGroupedUsers = (members, botId) => {
-    const getGroup = user => {
-        if (user.powerLevel < EXPECTED_POWER) {
-            return 'simpleUsers';
-        }
+const isRepoExists = async (baseRemote, repoName = DEFAULT_REMOTE_NAME) => {
+    try {
+        const remote = getProjectRemote(baseRemote, repoName);
 
-        return user.userId.includes(botId) ? 'bot' : 'admins';
-    };
+        await git().listRemote([remote]);
 
-    const res = R.pipe(R.groupBy(getGroup), R.map(R.map(R.path(['userId']))))(members);
+        return true;
+    } catch (error) {
+        logger.error(error);
 
-    return {
-        admins: res.admins || [],
-        simpleUsers: res.simpleUsers || [],
-        bot: res.bot || [],
-    };
-};
-
-const kickAllInRoom = async (chatApi, roomId, members) => {
-    const kickOne = async userId => {
-        const res = await chatApi.kickUserByRoom({ roomId, userId });
-
-        return { userId, isKicked: Boolean(res) };
-    };
-
-    const groupedData = getGroupedUsers(members, chatApi.getMyId());
-
-    const kickedUsers = await Promise.all(groupedData.simpleUsers.map(kickOne));
-    const viewRes = kickedUsers.map(({ userId, isKicked }) => `${userId} ---- ${isKicked}`).join('\n');
-    logger.debug(`Result of kicking users from room with id "${roomId}"\n${viewRes}`);
-
-    if (groupedData.admins.length) {
-        logger.debug(`Room have admins which bot cannot kick:\n ${groupedData.admins.join('\n')}`);
-
-        return ADMINS_EXISTS;
-    }
-
-    return ALL_DELETED;
-};
-
-const hasKickOption = bodyText => bodyText && bodyText.includes(KICK_ALL_OPTION);
-
-const hasPowerToKick = (botId, members, expectedPower) => {
-    const botData = members.find(user => user.userId.includes(botId));
-
-    return botData && botData.powerLevel === expectedPower;
-};
-
-const kick = async (chatApi, bodyText, roomData) => {
-    if (!hasKickOption(bodyText)) {
-        logger.debug(`Command was made without kick option in room with id ${roomData.id}`);
-
-        return NO_OPTION;
-    }
-
-    if (!hasPowerToKick(chatApi.getMyId(), roomData.members, EXPECTED_POWER)) {
-        logger.debug(`No power for kick in room with id ${roomData.id}`);
-
-        return NO_POWER;
-    }
-
-    const deleteStatus = await kickAllInRoom(chatApi, roomData.id, roomData.members);
-
-    return deleteStatus;
-};
-
-const deleteAlias = async (api, alias) => {
-    const res = await api.deleteRoomAlias(alias);
-    if (!res) {
-        logger.warn(`Alias ${alias} is not deleted by bot ${api.getMyId()} and should be saved`);
-
-        await setAlias(alias);
-    }
-};
-
-const archive = async ({ bodyText, roomId, sender, chatApi, roomData, config }) => {
-    const { alias } = roomData;
-    if (!alias) {
-        return translate('noAlias');
-    }
-
-    const issue = await jiraRequests.getIssueSafety(alias);
-    const isJiraRoom = await jiraRequests.isJiraPartExists(alias);
-    if (!issue && isJiraRoom) {
-        return translate('roomNotExistOrPermDen');
-    }
-
-    const issueMembersChatIds = await Promise.all(
-        utils.getIssueMembers(issue).map(displayName => chatApi.getUserIdByDisplayName(displayName)),
-    );
-    const matrixRoomAdminsId = (await chatApi.getRoomAdmins({ roomId })).map(({ userId }) => userId);
-    const admins = [...issueMembersChatIds, ...matrixRoomAdminsId].filter(Boolean);
-
-    const senderUserId = chatApi.getChatUserId(sender);
-
-    if (!admins.includes(senderUserId)) {
-        return translate('notAdmin', { sender });
-    }
-
-    const allEvents = await chatApi.getAllEventsFromRoom(roomId);
-    const repoLink = await gitPullToRepo(config, allEvents, roomData, chatApi, isJiraRoom);
-    if (!repoLink) {
-        return translate('archiveFail', { alias });
-    }
-
-    logger.debug(`Git push successfully complited in room ${roomId}!!!`);
-
-    const kickRes = await kick(chatApi, bodyText, roomData);
-
-    const successExoprtMsg = translate('successExport', { link: repoLink });
-
-    switch (kickRes) {
-        case NO_OPTION: {
-            return successExoprtMsg;
-        }
-        case NO_POWER: {
-            const msg = translate('noBotPower', { power: EXPECTED_POWER });
-
-            return [successExoprtMsg, msg].join('<br>');
-        }
-        case ALL_DELETED: {
-            // all are deleted and no message is needed
-            await deleteAlias(chatApi, roomData.alias);
-            await chatApi.leaveRoom(roomData.id);
-            return;
-        }
-        case ADMINS_EXISTS: {
-            const msg = translate('adminsAreNotKicked');
-            const sendedMsg = [successExoprtMsg, msg].join('<br>');
-            await chatApi.sendHtmlMessage(roomData.id, sendedMsg, sendedMsg);
-            await chatApi.leaveRoom(roomData.id);
-        }
+        return false;
     }
 };
 
 module.exports = {
-    deleteAlias,
-    DEFAULT_REMOTE_NAME,
-    DEFAULT_EXT,
     getMediaFileData,
-    archive,
-    // getHTMLtext,
     getMDtext,
-    gitPullToRepo,
-    EVENTS_DIR_NAME,
-    KICK_ALL_OPTION,
-    VIEW_FILE_NAME,
-    MEDIA_DIR_NAME,
+    exportEvents,
     transformEvent,
     getImageData,
-    FILE_DELIMETER,
-    kickAllInRoom,
     getRoomMainInfoMd,
-    getGroupedUsers,
-    kick,
+    DEFAULT_REMOTE_NAME,
+    DEFAULT_EXT,
+    EVENTS_DIR_NAME,
+    VIEW_FILE_NAME,
+    MEDIA_DIR_NAME,
+    FILE_DELIMETER,
+    isRepoExists,
+    getRepoLink,
 };
